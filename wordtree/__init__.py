@@ -3,6 +3,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict
 
+import pandas as pd
+from tqdm.auto import tqdm
+
 from graphviz import Digraph
 
 
@@ -23,7 +26,7 @@ def build_tree(ngrams, frequencies):
         subtree = tree
         for gram in ngram:
             if gram not in subtree.children:
-                subtree.children[gram] = FreqNode(children={}, freq=0)
+                subtree.children[gram] = FreqNode(children={}, freq=freq)
             subtree = subtree.children[gram]
         subtree.freq = freq
     return tree
@@ -52,7 +55,7 @@ def build_both_trees(keyword, ngrams, frequencies):
 
 
 class TreeDrawer:
-    def __init__(self, keyword, fwd_tree, bwd_tree, max_font_size=30, min_font_size=12):
+    def __init__(self, keyword, fwd_tree, bwd_tree, max_font_size=30, min_font_size=12, font_interp=None):
         self.max_font_size = max_font_size
         self.min_font_size = min_font_size
         self.keyword = keyword
@@ -60,16 +63,28 @@ class TreeDrawer:
         self.bwd_tree = bwd_tree
         self.max_freq = max([t.freq for t in fwd_tree.children.values()] +
                             [t.freq for t in bwd_tree.children.values()])
+        self.font_interp = None
 
-        self.graph = Digraph()
+        self.graph = Digraph(keyword, format='png')
         self.graph.attr('graph', rankdir='LR')
         self.graph.attr('node', shape='plaintext', margin='0')
 
+    def interpolate_fontsize(self, freq):
+        lower = self.min_font_size
+        upper = self.max_font_size
+        t = freq / self.max_freq
+
+        def quad(t):
+            return t ** (1. / 3)
+
+        font_interp = quad if self.font_interp is None else self.font_interp
+
+        return int(font_interp(t) * (upper - lower) + lower)
+
+
     def draw_subtree(self, tree, direction, root, suffix, depth):
         if depth > 0:
-            lower = self.min_font_size
-            upper = self.max_font_size
-            fontsize = int(tree.freq / self.max_freq * (upper - lower) + lower)
+            fontsize = self.interpolate_fontsize(tree.freq)
             self.graph.node(root + suffix, label=root, fontsize=str(fontsize))
 
         for word, subtree in tree.children.items():
@@ -91,18 +106,32 @@ class TreeDrawer:
         return self.graph
 
 
-def draw(keyword, ngrams, frequencies, **kwargs):
+def draw(keyword, ngrams, frequencies, max_per_n=8, **kwargs):
+    df = pd.DataFrame([
+        {'ngram': ngram, 'n': len(ngram), 'forward': ngram[0] == keyword,
+         'freq': freq}
+        for ngram, freq in zip(ngrams, frequencies)
+    ])
+
+    filtered_df = df.sort_values('freq', ascending=False) \
+                    .groupby(['forward', 'n']) \
+                    .head(max_per_n) \
+                    .reset_index()
+
+    ngrams = filtered_df.ngram.tolist()
+    frequencies = filtered_df.freq.tolist()
+
     fwd_tree, bwd_tree = build_both_trees(keyword, ngrams, frequencies)
     t = TreeDrawer(keyword, fwd_tree, bwd_tree, **kwargs)
     return t.draw()
 
 
-def search_and_draw(corpus, keyword, max_n=5, tokenizer=None, **kwargs):
+def search(corpus, keyword, max_n=5, tokenizer=None):
     if tokenizer is None:
-        tokenizer = lambda s: [w.lower() for w in s.split(' ')]
+        tokenizer = lambda s: [t.strip() for t in s.lower().split(' ') if t.strip() is not None]
 
     frequencies_dict = defaultdict(int)
-    for doc in corpus:
+    for doc in tqdm(corpus):
         tokens = tokenizer(doc)
         for n in range(2, max_n + 1):
             for i in range(0, len(tokens) - n + 1):
@@ -116,4 +145,8 @@ def search_and_draw(corpus, keyword, max_n=5, tokenizer=None, **kwargs):
         ngrams.append(ngram)
         frequencies.append(freq)
 
+    return ngrams, frequencies
+
+def search_and_draw(corpus, keyword, max_n=5, tokenizer=None, **kwargs):
+    ngrams, frequencies = search(corpus, keyword, max_n=max_n, tokenizer=tokenizer)
     return draw(keyword, ngrams, frequencies, **kwargs)

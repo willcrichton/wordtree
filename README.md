@@ -2,7 +2,7 @@
 
 This Python library generates word tree diagrams. Word tree diagrams show how often different phrases occur in a corpus that contain a specific keyword. For example, Here's the keyword "dog" in the [Amazon Pet Supplies review corpus](http://jmcauley.ucsd.edu/data/amazon/):
 
-![](https://github.com/willcrichton/wordtree/tree/master/static/dog.png)
+![](https://github.com/willcrichton/wordtree/raw/master/static/dog.png)
 
 ## Installation
 
